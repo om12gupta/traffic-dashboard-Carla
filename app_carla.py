@@ -1,8 +1,19 @@
+import os
 import json
 import time
 import cv2
 import numpy as np
 import streamlit as st
+
+# -------------------------------------------
+# Streamlit page config (set this FIRST)
+# -------------------------------------------
+st.set_page_config(page_title="Intersection Traffic Monitoring (CARLA Live)", layout="wide")
+
+# -------------------------------------------
+# Source mode & CARLA guard
+# -------------------------------------------
+st.sidebar.header("Source")
 mode = st.sidebar.radio("Source mode", ["File/Webcam", "CARLA"], index=0)
 
 # Only import CARLA when actually selected (important for Streamlit Cloud)
@@ -19,15 +30,11 @@ try:
 except Exception:
     YOLO_AVAILABLE = False
 
-st.set_page_config(page_title="Intersection Traffic Monitoring (CARLA Live)", layout="wide")
-
 # ================= UI: SOURCE ========================
-st.sidebar.header("Source")
-mode = st.sidebar.radio("Source mode", ["File/Webcam", "CARLA"], index=1)
-use_camera = st.sidebar.checkbox("Use webcam", value=False, disabled=(mode=="CARLA"))
+use_camera = st.sidebar.checkbox("Use webcam", value=False, disabled=(mode == "CARLA"))
 uploaded = None
 if mode == "File/Webcam":
-    uploaded = st.sidebar.file_uploader("Upload a video", type=["mp4","avi","mov","mkv"])
+    uploaded = st.sidebar.file_uploader("Upload a video", type=["mp4", "avi", "mov", "mkv"])
 
 # ================= UI: DETECTION =====================
 st.sidebar.markdown("---")
@@ -62,7 +69,7 @@ yellow_ew = st.sidebar.number_input("EW Yellow (s)", min_value=3, max_value=15, 
 st.title("🚦 Traffic Monitoring — Intersection (Fixed Camera)")
 
 # ------------------ helpers -------------------------
-VEH_CLASSES = {2,3,5,7}  # car, motorcycle, bus, truck
+VEH_CLASSES = {2, 3, 5, 7}  # car, motorcycle, bus, truck
 
 def parse_lanes(lanes_json, w, h):
     try:
@@ -71,8 +78,8 @@ def parse_lanes(lanes_json, w, h):
         cfg = json.loads(DEFAULT_LANES_JSON)
     lanes_px = {}
     for name, item in cfg.items():
-        pts = np.array([[int(x*w), int(y*h)] for x,y in item["poly"]], dtype=np.int32)
-        group = item.get("group","NS" if name in ("north","south") else "EW")
+        pts = np.array([[int(x*w), int(y*h)] for x, y in item["poly"]], dtype=np.int32)
+        group = item.get("group", "NS" if name in ("north", "south") else "EW")
         lanes_px[name] = {"poly": pts, "group": group}
     return lanes_px
 
@@ -85,7 +92,7 @@ def which_lane(lanes_px, cx, cy):
 
 def draw_lane_overlays(frame, lanes_px, state_by_group):
     overlay = frame.copy()
-    color_map = {"GREEN": (0,255,0), "YELLOW": (0,255,255), "RED": (0,0,255)}
+    color_map = {"GREEN": (0, 255, 0), "YELLOW": (0, 255, 255), "RED": (0, 0, 255)}
     for name, item in lanes_px.items():
         group = item["group"]
         state = state_by_group[group]
@@ -93,9 +100,9 @@ def draw_lane_overlays(frame, lanes_px, state_by_group):
         cv2.fillPoly(overlay, [item["poly"]], color)
         M = item["poly"].mean(axis=0).astype(int)
         cv2.putText(overlay, f"{name.upper()} [{state[0]}]", tuple(M),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,0), 3, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(overlay, f"{name.upper()} [{state[0]}]", tuple(M),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
     return cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
 
 # ---------- Non-flicker traffic light FSM ----------
@@ -103,14 +110,14 @@ def _phase_sequence():
     return ["NS_G", "NS_Y", "EW_G", "EW_Y"]
 
 def _phase_durations():
-    return {"NS_G":green_ns, "NS_Y":yellow_ns, "EW_G":green_ew, "EW_Y":yellow_ew}
+    return {"NS_G": green_ns, "NS_Y": yellow_ns, "EW_G": green_ew, "EW_Y": yellow_ew}
 
 def _phase_to_state(phase):
     return {
-        "NS_G":{"NS":"GREEN","EW":"RED"},
-        "NS_Y":{"NS":"YELLOW","EW":"RED"},
-        "EW_G":{"NS":"RED","EW":"GREEN"},
-        "EW_Y":{"NS":"RED","EW":"YELLOW"},
+        "NS_G": {"NS": "GREEN", "EW": "RED"},
+        "NS_Y": {"NS": "YELLOW", "EW": "RED"},
+        "EW_G": {"NS": "RED", "EW": "GREEN"},
+        "EW_Y": {"NS": "RED", "EW": "YELLOW"},
     }[phase]
 
 def init_signal_fsm():
@@ -129,7 +136,7 @@ def update_signal_fsm():
     elapsed = now - st.session_state.sig_started_at
     if elapsed >= durs[phase]:
         seq = _phase_sequence()
-        phase = seq[(seq.index(phase)+1)%len(seq)]
+        phase = seq[(seq.index(phase)+1) % len(seq)]
         st.session_state.sig_phase = phase
         st.session_state.sig_started_at = now
         elapsed = 0.0
@@ -145,6 +152,7 @@ def open_capture(src):
     return cv2.VideoCapture(src)
 
 def carla_intersection_stream():
+    # Import happens only when called (and only if mode == "CARLA")
     import carla, numpy as np, time
     client = carla.Client("127.0.0.1", 2000)
     client.set_timeout(10.0)
@@ -188,6 +196,7 @@ m3 = c3.metric("South", 0)
 m4 = c4.metric("West",  0)
 chart = st.line_chart(use_container_width=True)
 
+# load YOLO
 model = None
 if enable_detection and YOLO_AVAILABLE:
     try:
@@ -195,17 +204,40 @@ if enable_detection and YOLO_AVAILABLE:
     except Exception as e:
         st.warning(f"YOLO init failed: {e}")
 
+# --------- Source setup ----------
 if mode == "CARLA":
+    # (Optional) show a message on Cloud
+    # st.error("CARLA mode is only supported locally. Use File/Webcam on Streamlit Cloud."); st.stop()
     stream = carla_intersection_stream()
     fps = 20.0
 else:
-    default_demo = 0 if use_camera else "traffic_demo.mp4"
-    cap = open_capture(uploaded if uploaded is not None else default_demo)
+    # Prefer your uploaded GitHub video "traffic demo.mp4";
+    # also try common fallback names.
+    default_candidates = [
+        "traffic demo.mp4",
+        "traffic_demo.mp4",
+        "traffic.mp4",
+        "Screen Recording 2025-11-24 171327.mp4"
+    ]
+    default_demo = None
+    for cand in default_candidates:
+        if os.path.exists(cand):
+            default_demo = cand
+            break
+    if default_demo is None:
+        default_demo = 0 if use_camera else "traffic demo.mp4"  # last resort; may fail if file missing
+
+    if uploaded is not None:
+        cap = open_capture(uploaded)
+    else:
+        cap = cv2.VideoCapture(default_demo)
+
     if not cap or not cap.isOpened():
-        st.error("Could not open source."); st.stop()
+        st.error(f"Could not open source. Expected video like '{default_demo}'.")
+        st.stop()
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
-counts = {"north":0, "east":0, "south":0, "west":0}
+counts = {"north": 0, "east": 0, "south": 0, "west": 0}
 prev_lane_by_bucket = {}
 history = []
 last_plot = time.time()
@@ -246,17 +278,17 @@ while True:
                 boxes = r.boxes.xyxy.cpu().numpy()
                 clss  = r.boxes.cls.cpu().numpy().astype(int)
                 num_boxes += len(boxes)
-                for (x1,y1,x2,y2), cls_id in zip(boxes, clss):
-                    cx = int((x1+x2)/2)
-                    cy = int((y1+y2)/2)
-                    detections.append((cx,cy,(int(x1),int(y1),int(x2),int(y2))))
+                for (x1, y1, x2, y2), cls_id in zip(boxes, clss):
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2)
+                    detections.append((cx, cy, (int(x1), int(y1), int(x2), int(y2))))
 
     # ---------- lane assignment ----------
     current = []
-    for (cx,cy,box) in detections:
+    for (cx, cy, box) in detections:
         lane = which_lane(lanes_px, cx, cy)
         if lane:
-            key = (cx//50, cy//50)
+            key = (cx // 50, cy // 50)
             current.append((key, lane, box))
 
     pm = dict(prev_lane_by_bucket)
@@ -270,15 +302,15 @@ while True:
     # ---------- draw boxes ----------
     if show_dets:
         for _, _, (x1, y1, x2, y2) in current:
-            cv2.rectangle(frame, (x1,y1), (x2,y2), (255,255,255), 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 2)
 
     # ---------- lane overlays ----------
     frame = draw_lane_overlays(frame, lanes_px, state_by_group)
 
     # ---------- dashboard header ----------
     hdr = f"NS: {state_by_group['NS']} | EW: {state_by_group['EW']} | Next: {int(time_left)}s | Detections: {num_boxes}"
-    cv2.putText(frame, hdr, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,0), 3)
-    cv2.putText(frame, hdr, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 1)
+    cv2.putText(frame, hdr, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
+    cv2.putText(frame, hdr, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
 
     # ---------- Streamlit output ----------
     frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB")
@@ -294,4 +326,4 @@ while True:
         last_plot = time.time()
 
     # ---------- throttle ----------
-    time.sleep(max(0, 1.0/(fps+1e-6)))
+    time.sleep(max(0, 1.0 / (fps + 1e-6)))

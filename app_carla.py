@@ -3,6 +3,11 @@ import time
 import cv2
 import numpy as np
 import streamlit as st
+mode = st.sidebar.radio("Source mode", ["File/Webcam", "CARLA"], index=0)
+
+# Only import CARLA when actually selected (important for Streamlit Cloud)
+if mode == "CARLA":
+    import carla
 
 # ------------------ YOLO + device ------------------
 YOLO_AVAILABLE = True
